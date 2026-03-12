@@ -1,8 +1,10 @@
 name: Dependabot Auto-merge
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
 
 permissions:
   contents: write
@@ -11,22 +13,64 @@ permissions:
 jobs:
   auto-merge:
     runs-on: ubuntu-latest
-    # Only run on Dependabot PRs
-    if: github.actor == 'dependabot[bot]'
+    # Only run on Dependabot PRs where CI passed
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
 
     steps:
+      - name: Get PR number
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pulls = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${context.payload.workflow_run.head_branch}`,
+              state: 'open'
+            });
+            
+            if (pulls.data.length === 0) {
+              console.log('No open PR found for this branch');
+              return null;
+            }
+            
+            const pr = pulls.data[0];
+            console.log(`Found PR #${pr.number}`);
+            return pr.number;
+
+      - name: Check if PR is from Dependabot
+        id: check
+        if: steps.pr.outputs.result != 'null'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.pr.outputs.result }};
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            
+            const isDependabot = pr.data.user.login === 'dependabot[bot]';
+            console.log(`PR author: ${pr.data.user.login}, isDependabot: ${isDependabot}`);
+            return isDependabot;
+
       - name: Dependabot metadata
         id: metadata
+        if: steps.check.outputs.result == 'true'
         uses: dependabot/fetch-metadata@v2
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Enable auto-merge for Dependabot PRs
+      - name: Merge Dependabot PR
         # Auto-merge patch and minor updates
         if: |
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor'
-        run: gh pr merge --auto --squash "$PR_URL"
+          steps.check.outputs.result == 'true' &&
+          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+           steps.metadata.outputs.update-type == 'version-update:semver-minor')
+        run: gh pr merge --squash "$PR_NUMBER"
         env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ steps.pr.outputs.result }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
