@@ -12,10 +12,10 @@
     "test:e2e:ci": "CI=true playwright test"
   },
   "dependencies": {
-    "@christopher-drifte/clock": "~1.5.0",
+    "@christopher-drifte/clock": "~1.12.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "tailwindcss": "^4.0.0"
+    "tailwindcss": "^4.2.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
